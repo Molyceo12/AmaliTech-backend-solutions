@@ -52,10 +52,30 @@ class LoginView(TokenObtainPairView):
             }, status=status.HTTP_401_UNAUTHORIZED)
 
 
+import hashlib
+
 class ProcessPaymentView(generics.GenericAPIView):
     permission_classes = (AllowAny,)
 
     def post(self, request, *args, **kwargs):
+        amount_raw = request.data.get('amount')
+        currency = request.data.get('currency')
+
+        if amount_raw is None or currency is None:
+            return Response({"error": "Missing amount or currency"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            amount = float(amount_raw)
+            if amount <= 0:
+                return Response({"error": "Amount must be a positive number"}, status=status.HTTP_400_BAD_REQUEST)
+        except (ValueError, TypeError):
+            return Response({"error": "Invalid amount format"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not isinstance(currency, str) or not currency.strip():
+            return Response({"error": "Invalid currency"}, status=status.HTTP_400_BAD_REQUEST)
+
+        request_body_hash = hashlib.sha256(json.dumps(request.data, sort_keys=True).encode()).hexdigest()
+
         rate_key = f"rate:{request.user.id}"
         request_count = cache.get(rate_key, 0)
         
@@ -78,7 +98,7 @@ class ProcessPaymentView(generics.GenericAPIView):
         
         lock_data = {
             "status": "STARTED",
-            "request_data": request.data
+            "body_hash": request_body_hash
         }
         
         is_new = cache.set(redis_key, json.dumps(lock_data), timeout=3600, nx=True)
@@ -86,7 +106,7 @@ class ProcessPaymentView(generics.GenericAPIView):
         if not is_new:
             cached_val = json.loads(cache.get(redis_key))
             
-            if cached_val.get('request_data') != request.data:
+            if cached_val.get('body_hash') != request_body_hash:
                 return Response({
                     "success": False,
                     "message": "Idempotency key already used for a different request body."
@@ -106,42 +126,34 @@ class ProcessPaymentView(generics.GenericAPIView):
 
         try:
             time.sleep(2)
-            
-            amount_raw = request.data.get('amount')
-            currency = request.data.get('currency', 'USD')
             user = request.user
             
-            if not amount_raw:
-                response_data = {"success": False, "message": "Amount is required"}
+            if user.balance < amount:
+                response_data = {
+                    "success": False,
+                    "message": "Insufficient balance",
+                    "current_balance": float(user.balance)
+                }
                 status_code = status.HTTP_400_BAD_REQUEST
             else:
-                amount = float(amount_raw)
-                if user.balance < amount:
-                    response_data = {
-                        "success": False,
-                        "message": "Insufficient balance",
-                        "current_balance": float(user.balance)
+                user.balance = float(user.balance) - amount
+                user.save()
+                response_data = {
+                    "success": True,
+                    "message": f"Charged {amount} {currency}",
+                    "data": {
+                        "transaction_id": f"txn_{int(time.time())}",
+                        "amount": amount,
+                        "currency": currency,
+                        "remaining_balance": float(user.balance)
                     }
-                    status_code = status.HTTP_400_BAD_REQUEST
-                else:
-                    user.balance = float(user.balance) - amount
-                    user.save()
-                    response_data = {
-                        "success": True,
-                        "message": f"Charged {amount} {currency}",
-                        "data": {
-                            "transaction_id": f"txn_{int(time.time())}",
-                            "amount": amount,
-                            "currency": currency,
-                            "remaining_balance": float(user.balance)
-                        }
-                    }
-                    status_code = status.HTTP_201_CREATED
+                }
+                status_code = status.HTTP_201_CREATED
 
             
             final_data = {
                 "status": "COMPLETED",
-                "request_data": request.data,
+                "body_hash": request_body_hash,
                 "response_data": response_data,
                 "status_code": status_code
             }
