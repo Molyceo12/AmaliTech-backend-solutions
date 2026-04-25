@@ -19,6 +19,4 @@ class RegisterSerializer(serializers.ModelSerializer):
         return user
 
 class LoginSerializer(TokenObtainPairSerializer):
-    # This inherits from simplejwt's TokenObtainPairSerializer
-    # which uses the USERNAME_FIELD (email in our case) and password.
     pass
