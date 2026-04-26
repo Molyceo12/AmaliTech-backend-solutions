@@ -43,11 +43,19 @@ Before running the application, ensure you have the following installed on your 
 
 The API will instantly be available at `http://127.0.0.1:8000/`.
 
-## 3. API Documentation
+## 4. Production Deployment (Render)
+This repository is pre-configured for free deployment on [Render](https://render.com/).
+1. Create a new **Web Service** on Render and link this repository.
+2. Under **Root Directory**, type `backend/Idempotency-gateway`.
+3. Set the **Build Command** to `./build.sh`.
+4. Set the **Start Command** to `gunicorn idempotency_gateway.wsgi:application`.
+5. Under Environment Variables, add `REDIS_URL` containing your managed Redis connection string.
+
+## 5. API Documentation
 
 ### 1. Register API
 **Description**: Register a new client/user account to receive starting funds (10000 default balance).
-- **URL**: `http://127.0.0.1:8000/api/auth/register/`
+- **URL**: `http://127.0.0.1:8000/api/auth/register/` (Local) OR `https://amalitech-backend-solutions.onrender.com/api/auth/register/` (Live)
 - **Method**: `POST`
 - **Headers**: 
   - `Content-Type: application/json`
@@ -71,7 +79,7 @@ The API will instantly be available at `http://127.0.0.1:8000/`.
 
 ### 2. Login API
 **Description**: Authenticate and retrieve a JWT Access Token.
-- **URL**: `http://127.0.0.1:8000/api/auth/login/`
+- **URL**: `http://127.0.0.1:8000/api/auth/login/` (Local) OR `https://amalitech-backend-solutions.onrender.com/api/auth/login/` (Live)
 - **Method**: `POST`
 - **Headers**: 
   - `Content-Type: application/json`
@@ -96,7 +104,7 @@ The API will instantly be available at `http://127.0.0.1:8000/`.
 
 ### 3. Process Payment API
 **Description**: Process a payment utilizing strict idempotency cache validation and payload hashing.
-- **URL**: `http://127.0.0.1:8000/api/auth/process-payment/`
+- **URL**: `http://127.0.0.1:8000/api/auth/process-payment/` (Local) OR `https://amalitech-backend-solutions.onrender.com/api/auth/process-payment/` (Live)
 - **Method**: `POST`
 - **Headers**: 
   - `Content-Type: application/json`
@@ -163,7 +171,7 @@ The API will instantly be available at `http://127.0.0.1:8000/`.
   }
   ```
 
-## 4. Design Decisions
+## 6. Design Decisions
 
 ### 1. Backend Framework (Django REST Framework)
 - **Why**: DRF provides rapid API development with rigorous built-in serialization and validation layers.
@@ -187,7 +195,7 @@ The API will instantly be available at `http://127.0.0.1:8000/`.
 
 
 
-## 5. The Developer's Choice
+## 7. The Developer's Choice
 
 To push this architecture beyond core requirements, I designed three active defense mechanisms to handle the realities of a production fintech environment:
 

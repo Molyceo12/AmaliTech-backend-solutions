@@ -83,7 +83,7 @@ class ProcessPaymentView(generics.GenericAPIView):
             return Response({"error": "Too many requests"}, status=status.HTTP_429_TOO_MANY_REQUESTS)
         
         if request_count == 0:
-            cache.set(rate_key, 1, timeout=10)
+            cache.set(rate_key, 1, timeout=60)
         else:
             cache.incr(rate_key)
 
