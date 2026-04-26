@@ -36,22 +36,16 @@ Before running the application, ensure you have the following installed on your 
    **What this single command automatically does for you:**
    - Starts a Redis instance in the background using Docker.
    - Creates a virtual environment and **Installs requirements**.
-   - Runs the SQLite database **Migrations**.
+   - Runs the **PostgreSQL (Supabase)** database migrations.
    - **Runs the backend server** natively.
 
 *(Note: This requires you to have Docker installed to run the Redis cache, and Python3 to run the web server).*
 
 The API will instantly be available at `http://127.0.0.1:8000/`.
 
-## 4. Production Deployment (Render)
-This repository is pre-configured for free deployment on [Render](https://render.com/).
-1. Create a new **Web Service** on Render and link this repository.
-2. Under **Root Directory**, type `backend/Idempotency-gateway`.
-3. Set the **Build Command** to `./build.sh`.
-4. Set the **Start Command** to `gunicorn idempotency_gateway.wsgi:application`.
-5. Under Environment Variables, add `REDIS_URL` containing your managed Redis connection string.
 
-## 5. API Documentation
+
+## 4. API Documentation
 
 ### 1. Register API
 **Description**: Register a new client/user account to receive starting funds (10000 default balance).
@@ -171,7 +165,7 @@ This repository is pre-configured for free deployment on [Render](https://render
   }
   ```
 
-## 6. Design Decisions
+## 5. Design Decisions
 
 ### 1. Backend Framework (Django REST Framework)
 - **Why**: DRF provides rapid API development with rigorous built-in serialization and validation layers.
@@ -185,9 +179,9 @@ This repository is pre-configured for free deployment on [Render](https://render
 - **Why**: Financial infrastructure demands absolute environment parity across local, testing, and production servers.
 - **Justification**: Wrapping Redis in a Docker container (invoked via the unified `Makefile`) guarantees that any developer or CI pipeline can instantly spin up the required caching layer without fighting system-level dependencies. It completely eliminates the "it works on my machine" anti-pattern.
 
-### 4. Database Choice (SQLite)
-- **Why**: Chosen strictly for prototype velocity and portability in this specific repository.
-- **Justification**: SQLite allows reviewers to clone, migrate, and run the project with zero external database configuration. While a true production environment would hot-swap this for PostgreSQL to support concurrent writes and transaction isolation, SQLite safely satisfies the lightweight persistence requirements for User and Balance tracking here.
+### 4. Database Choice (PostgreSQL / Supabase)
+- **Why**: Chosen to provide a robust, production-grade relational database with high availability and connection pooling.
+- **Justification**: Using Supabase ensures that the gateway can handle concurrent transaction processing with ACID compliance and professional-grade security. The system is pre-configured to connect to Supabase automatically, allowing for an immediate "clone and run" experience without manual setup.
 
 ### 5. Concurrency & Race Condition Handling
 - **Why**: Network stutters often cause clients to rapidly fire duplicate requests within milliseconds, triggering parallel execution.
@@ -195,7 +189,7 @@ This repository is pre-configured for free deployment on [Render](https://render
 
 
 
-## 7. The Developer's Choice
+## 6. The Developer's Choice
 
 To push this architecture beyond core requirements, I designed three active defense mechanisms to handle the realities of a production fintech environment:
 

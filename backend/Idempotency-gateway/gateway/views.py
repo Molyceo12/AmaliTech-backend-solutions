@@ -1,12 +1,16 @@
-from rest_framework import generics, status
-from rest_framework.response import Response
-from rest_framework.permissions import AllowAny
-from rest_framework_simplejwt.views import TokenObtainPairView
-from .serializers import RegisterSerializer, LoginSerializer
-from django.contrib.auth import get_user_model
-import time
+import hashlib
 import json
+import time
+
+from django.contrib.auth import get_user_model
 from django.core.cache import cache
+from django.shortcuts import get_object_or_404
+from rest_framework import generics, status
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+from rest_framework_simplejwt.views import TokenObtainPairView
+
+from .serializers import LoginSerializer, RegisterSerializer
 
 User = get_user_model()
 
@@ -51,11 +55,8 @@ class LoginView(TokenObtainPairView):
                 "errors": str(e)
             }, status=status.HTTP_401_UNAUTHORIZED)
 
-
-import hashlib
-
 class ProcessPaymentView(generics.GenericAPIView):
-    permission_classes = (AllowAny,)
+    permission_classes = (IsAuthenticated,)
 
     def post(self, request, *args, **kwargs):
         amount_raw = request.data.get('amount')
@@ -67,20 +68,18 @@ class ProcessPaymentView(generics.GenericAPIView):
         try:
             amount = float(amount_raw)
             if amount <= 0:
-                return Response({"error": "Amount must be a positive number"}, status=status.HTTP_400_BAD_REQUEST)
+                raise ValueError
         except (ValueError, TypeError):
-            return Response({"error": "Invalid amount format"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Amount must be a positive number"}, status=status.HTTP_400_BAD_REQUEST)
 
         if not isinstance(currency, str) or not currency.strip():
             return Response({"error": "Invalid currency"}, status=status.HTTP_400_BAD_REQUEST)
 
-        request_body_hash = hashlib.sha256(json.dumps(request.data, sort_keys=True).encode()).hexdigest()
-
-        rate_key = f"rate:{request.user.id}"
+        rate_key = f"rate_limit:{request.user.id}"
         request_count = cache.get(rate_key, 0)
         
         if request_count >= 5:
-            return Response({"error": "Too many requests"}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+            return Response({"error": "Too many requests. Please wait 60 seconds."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
         
         if request_count == 0:
             cache.set(rate_key, 1, timeout=60)
@@ -94,14 +93,15 @@ class ProcessPaymentView(generics.GenericAPIView):
                 "message": "Idempotency-Key header is required",
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        redis_key = f"idempotency:{request.user.id}:{idempotency_key}"
+        request_body_hash = hashlib.sha256(json.dumps(request.data, sort_keys=True).encode()).hexdigest()
+        redis_key = f"idempotent_txn:{request.user.id}:{idempotency_key}"
         
-        lock_data = {
-            "status": "STARTED",
+        lock_init = {
+            "status": "PROCESSING",
             "body_hash": request_body_hash
         }
         
-        is_new = cache.set(redis_key, json.dumps(lock_data), timeout=3600, nx=True)
+        is_new = cache.set(redis_key, json.dumps(lock_init), timeout=3600, nx=True)
 
         if not is_new:
             cached_val = json.loads(cache.get(redis_key))
@@ -109,14 +109,14 @@ class ProcessPaymentView(generics.GenericAPIView):
             if cached_val.get('body_hash') != request_body_hash:
                 return Response({
                     "success": False,
-                    "message": "Idempotency key already used for a different request body."
+                    "message": "Idempotency key usage conflict: different request body detected."
                 }, status=status.HTTP_409_CONFLICT)
 
-            while cached_val.get('status') == 'STARTED':
+            while cached_val.get('status') == 'PROCESSING':
                 time.sleep(0.5)
-                raw_val = cache.get(redis_key)
-                if not raw_val: break # Should not happen with long TTL
-                cached_val = json.loads(raw_val)
+                raw_payload = cache.get(redis_key)
+                if not raw_payload: break
+                cached_val = json.loads(raw_payload)
             
             return Response(
                 cached_val.get('response_data'), 
@@ -137,10 +137,11 @@ class ProcessPaymentView(generics.GenericAPIView):
                 status_code = status.HTTP_400_BAD_REQUEST
             else:
                 user.balance = float(user.balance) - amount
-                user.save()
+                user.save(update_fields=['balance'])
+                
                 response_data = {
                     "success": True,
-                    "message": f"Charged {amount} {currency}",
+                    "message": f"Successfully charged {amount} {currency}",
                     "data": {
                         "transaction_id": f"txn_{int(time.time())}",
                         "amount": amount,
@@ -150,18 +151,19 @@ class ProcessPaymentView(generics.GenericAPIView):
                 }
                 status_code = status.HTTP_201_CREATED
 
-            
-            final_data = {
+            final_payload = {
                 "status": "COMPLETED",
                 "body_hash": request_body_hash,
                 "response_data": response_data,
                 "status_code": status_code
             }
-            cache.set(redis_key, json.dumps(final_data), timeout=86400)
+            cache.set(redis_key, json.dumps(final_payload), timeout=86400)
 
             return Response(response_data, status=status_code)
             
         except Exception as e:
-           
             cache.delete(redis_key)
-            return Response({"success": False, "message": str(e)}, status=500)
+            return Response({
+                "success": False, 
+                "message": "Internal gateway error during processing."
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
