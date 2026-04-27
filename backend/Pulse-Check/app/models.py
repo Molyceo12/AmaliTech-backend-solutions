@@ -7,10 +7,15 @@ class Monitor(models.Model):
         PAUSED = 'paused', 'Paused'
 
     id = models.CharField(max_length=255, primary_key=True)
-    timeout = models.IntegerField(help_text="Timeout in seconds")
+    timeout = models.IntegerField(default=60)
     alert_email = models.EmailField()
-    last_heartbeat = models.DateTimeField(auto_now_add=True)
-    status = models.CharField(max_length=10, choices=Status.choices, default=Status.ACTIVE)
+    status = models.CharField(
+        max_length=10,
+        choices=Status.choices,
+        default=Status.ACTIVE
+    )
+    last_heartbeat = models.DateTimeField(null=True, blank=True)
+    task_id = models.CharField(max_length=255, null=True, blank=True)
 
     def __str__(self):
-        return f"{self.id} - {self.status}"
+        return f"{self.id} ({self.status})"

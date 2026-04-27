@@ -19,45 +19,50 @@ class MonitorCreateView(generics.CreateAPIView):
 
     def perform_create(self, serializer):
         monitor = serializer.save()
-        
-        # Redis: Track real-time activity with TTL
         redis_key = f"active_monitor_{monitor.id}"
         cache.set(redis_key, True, timeout=monitor.timeout)
-        
-        # setTimeout: Start background timer
         start_monitor_timer(monitor.id, monitor.timeout)
 
 class HeartbeatView(APIView):
     def post(self, request, pk):
         monitor = get_object_or_404(Monitor, id=pk)
-        
-        # 1. Update Database (Persistence)
+        was_down = (monitor.status == Monitor.Status.DOWN)
         monitor.last_heartbeat = timezone.now()
         monitor.status = Monitor.Status.ACTIVE
         monitor.save(update_fields=['last_heartbeat', 'status'])
         
-        # 2. Update Redis: Reset TTL
         redis_key = f"active_monitor_{monitor.id}"
         cache.set(redis_key, True, timeout=monitor.timeout)
-        
-        # 3. Restart setTimeout
         start_monitor_timer(monitor.id, monitor.timeout)
         
-        return Response({"success": True, "message": "Heartbeat received, Redis TTL reset."}, status=status.HTTP_200_OK)
+        message = "Heartbeat received. Device is active."
+        if was_down:
+            message = "Heartbeat received. Device restored from DOWN state."
+            
+        return Response({
+            "success": True, 
+            "message": message,
+            "id": monitor.id
+        }, status=status.HTTP_200_OK)
 
 class PauseView(APIView):
     def post(self, request, pk):
         monitor = get_object_or_404(Monitor, id=pk)
-        
-        # 1. Update Database
+        if monitor.status == Monitor.Status.PAUSED:
+            return Response({"success": True, "message": "Device is already paused."}, status=status.HTTP_200_OK)
+            
         monitor.status = Monitor.Status.PAUSED
         monitor.save(update_fields=['status'])
         
-        # 2. Delete Redis Key
         redis_key = f"active_monitor_{monitor.id}"
         cache.delete(redis_key)
-        
-        # 3. Cancel setTimeout
         cancel_monitor_timer(monitor.id)
         
-        return Response({"success": True, "message": "Monitoring paused."}, status=status.HTTP_200_OK)
+        return Response({
+            "success": True, 
+            "message": f"Monitoring paused for {monitor.id}."
+        }, status=status.HTTP_200_OK)
+
+class MonitorStatusView(generics.RetrieveAPIView):
+    queryset = Monitor.objects.all()
+    serializer_class = MonitorSerializer

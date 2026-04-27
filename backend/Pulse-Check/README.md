@@ -1,156 +1,174 @@
-# Pulse-Check-API ("Watchdog" Sentinel)
+# Pulse-Check-API (The "Watchdog" Sentinel)
 
-This challenge is designed to test your ability to bridge Computer Science fundamentals with Modern Backend Engineering.
+A high-reliability monitoring system that tracks remote device heartbeats and triggers critical alerts when communication falls silent. Built with Django REST Framework, Celery, and Redis for distributed background processing.
 
-## 1. Business Context
+## 1. Architecture Diagram
+![System Flowchart](pulse_check.drawio.svg)
+> *This diagram illustrates the stateful lifecycle of a monitor. The "Watchdog" (Celery) asynchronously tracks heartbeats in Redis and fires a background alert the moment a device misses its communication window.*
 
-> **Client:** _CritMon Servers Inc._ (A Critical Infrastructure Monitoring Company).
+## 2. Prerequisites
+Ensure you have the following installed to run the sentinel infrastructure:
 
-### The Problem
+- **[Python 3.10+](https://www.python.org/downloads/)**: Required to run the Django API and Celery worker.
+- **[Docker Desktop](https://www.docker.com/products/docker-desktop/)**: Used to instantly spin up the Redis message broker.
+  - *Alternative:* If you don't have Docker, you must start a Redis server locally on `localhost:6379`.
 
-CritMon provides monitoring for remote solar farms and unmanned weather stations in areas with poor connectivity. These devices are supposed to send "I'm alive" signals every hour.
+## 3. Setup Instructions
 
-Currently, CritMon has no way of knowing if a device has gone offline (due to power failure or theft) until a human manually checks the logs. They need a system that alerts _them_ when a device _stops_ talking.
+1. **Clone and Navigate**
+   ```bash
+   cd AmaliTech-DEG-Project-based-challenges-solutions/backend/Pulse-Check
+   ```
 
-### The Solution
+2. **Start the Sentinel using the Makefile**
+   ```bash
+   make start
+   ```
+   
+   **What this command automatically does for you:**
+   - Starts a **Redis instance** via Docker (ignore errors if already running).
+   - Creates a virtual environment and **Installs requirements**.
+   - Runs **Database migrations**.
+   - Launches both the **Django API** and the **Celery Sentinel** in a single unified terminal view.
 
-You need to build a **Dead Man’s Switch API**. Devices will register a "monitor" with a countdown timer (e.g., 60 seconds). If the device fails to "ping" (send a heartbeat) to the API before the timer runs out, the system automatically triggers an alert.
+## 4. API Documentation
 
----
+### 1. Register Monitor
+**Description**: Register a new device to the monitoring system.
 
-## 2. Technical Objective
+**Url Localhost**
+```bash
+curl -X POST http://127.0.0.1:8000/register_monitor
+```
 
-Build a backend service that manages stateful timers.
+**Url Live**
+```bash
+curl -X POST https://pulse-check-5g1i.onrender.com/register_monitor
+```
 
-- **Registration:** Allow a client to create a monitor with a specific timeout duration.
-- **Heartbeat:** Reset the countdown when a ping is received.
-- **Trigger:** Fire a webhook (or log a critical error) if the countdown reaches zero.
+**Request Body**
+```json
+{
+  "id": "device-01", 
+  "timeout": 60, 
+  "alert_email": "admin@critmon.com"
+}
+```
 
----
+**Response Body**
+```json
+{
+    "id": "device-01",
+    "timeout": 60,
+    "alert_email": "admin@critmon.com",
+    "status": "active",
+    "last_heartbeat": null
+}
+```
 
-## 3. Getting Started
+### 2. Device Heartbeat (Reset)
+**Description**: Reset the watchdog timer for an active device.
 
-1.  **Fork this Repository:** Do not clone it directly. Create a fork to your own GitHub account.
-2.  **Environment:** You may use **Node.js, Python, Java or Go, etc.**.
-3.  **Submission:** Your final submission will be a link to your forked repository containing:
-    - The source code.
-    - The **Architecture Diagram**
-    - The `README.md` with documentation.
+**Url Localhost**
+```bash
+curl -X POST http://127.0.0.1:8000/monitors/device-01/heartbeat
+```
 
----
+**Url Live**
+```bash
+curl -X POST https://pulse-check-5g1i.onrender.com/monitors/device-01/heartbeat
+```
 
-## 4. The Architecture Diagram
+**Response Body**
+```json
+{
+    "success": true,
+    "message": "Heartbeat received. Device is active.",
+    "id": "device-01"
+}
+```
 
-**Task:** Before you write any code, you must design the logic flow.
-**Deliverable:** A **Sequence Diagram** or **State Flowchart** embedded in your `README.md`.
+### 3. Check Device Status
+**Description**: Retrieve the real-time health status of a device.
 
----
+**Url Localhost**
+```bash
+curl -X GET http://127.0.0.1:8000/monitors/device-01/status
+```
 
-## 5. User Stories & Acceptance Criteria
+**Url Live**
+```bash
+curl -X GET https://pulse-check-5g1i.onrender.com/monitors/device-01/status
+```
 
-### User Story 1: Registering a Monitor
+**Response Body**
+```json
+{
+    "id": "device-01",
+    "timeout": 60,
+    "alert_email": "admin@critmon.com",
+    "status": "active",
+    "last_heartbeat": "2026-04-27T15:53:42Z"
+}
+```
 
-**As a** device administrator,
-**I want to** create a new monitor for my device,
-**So that** the system knows to track its status.
+### 4. Pause Monitoring (Snooze)
+**Description**: Temporarily stop monitoring for maintenance.
 
-**Acceptance Criteria:**
+**Url Localhost**
+```bash
+curl -X POST http://127.0.0.1:8000/monitors/device-01/pause
+```
 
-- [ ] The API accepts a `POST /monitors` request.
-- [ ] Input: `{"id": "device-123", "timeout": 60, "alert_email": "admin@critmon.com"}`.
-- [ ] The system starts a countdown timer for 60 seconds associated with `device-123`.
-- [ ] Response: `201 Created` with a confirmation message.
+**Url Live**
+```bash
+curl -X POST https://pulse-check-5g1i.onrender.com/monitors/device-01/pause
+```
 
-### User Story 2: The Heartbeat (Reset)
+**Response Body**
+```json
+{
+    "success": true, 
+    "message": "Monitoring paused for device-01."
+}
+```
 
-**As a** remote device,
-**I want to** send a signal to the server,
-**So that** my timer is reset and no alert is sent.
+## 5. Design Decisions
 
-**Acceptance Criteria:**
+### 1. Backend Framework (Django REST Framework)
+- **Why**: DRF provides rapid API development with a rigorous built-in serialization and validation layer.
+- **Justification**: In a monitoring system, data integrity is paramount. By using DRF, I ensured that every incoming heartbeat and registration request is validated against strict constraints (e.g., positive integers for timeouts) before any background logic is triggered. This creates a "Fail-Fast" architecture that protects the system from malformed data.
 
-- [ ] The API accepts a `POST /monitors/{id}/heartbeat` request.
-- [ ] If the ID exists and the timer has NOT expired:
-  - [ ] Restart the countdown from the beginning (e.g., reset to 60 seconds).
-  - [ ] Return `200 OK`.
-- [ ] If the ID does not exist:
-  - [ ] Return `404 Not Found`.
+### 2. Distributed Task Queue (Celery)
+- **Why**: Handling thousands of concurrent countdown timers using native OS threads or memory-mapped objects would rapidly overload the main API process, leading to memory bloat and eventual crashes.
+- **Justification**: Celery was chosen to offload the heavy "Watchdog" logic to a separate dedicated worker process. By using a distributed queue, the system ensures that the main API remains responsive and thin, while Celery handles the background timing logic with maximum CPU efficiency and process isolation.
 
-### User Story 3: The Alert (Failure State)
+### 3. State Management & Messaging (Redis)
+- **Why**: The system requires extreme low-latency for frequent heartbeat resets.
+- **Justification**: Redis serves two critical roles: it acts as the high-performance broker for Celery tasks and as a real-time activity cache. By managing heartbeats in Redis instead of performing heavy database writes every second, the system can scale to monitor thousands of devices simultaneously with minimal performance overhead.
 
-**As a** support engineer,
-**I want to** be notified immediately if a device stops sending heartbeats,
-**So that** I can deploy a repair team.
+### 4. Atomic Task Management
+- **Why**: Overlapping timers can lead to "False Positive" alerts if multiple tasks are scheduled for the same device.
+- **Justification**: I implemented a strict **Atomic Task ID** system. Each device stores its current active `task_id` in the database. When a new heartbeat arrives, the system uses this ID to `revoke` the previous timer before scheduling a new one. This guarantees that each device has exactly **one** active watchdog at any given time, preventing race conditions.
 
-**Acceptance Criteria:**
+### 5. Deployment & Parity (Docker)
+- **Why**: Monitoring infrastructure must be reproducible across any environment (Testing, QA, Production).
+- **Justification**: Utilizing a unified Docker-based workflow ensures that the Redis networking and the Python environment are identical for every user. Any tester can use the `make` utility to spin up the entire infrastructure without fighting local system dependencies.
 
-- [ ] If the timer for `device-123` reaches 0 seconds (no heartbeat received):
-  - [ ] The system must internally "fire" an alert.
-  - [ ] **Implementation:** For this project, simply `console.log` a JSON object: `{"ALERT": "Device device-123 is down!", "time": <timestamp>}`. (Or simulate sending an email).
-  - [ ] The monitor status changes to `down`.
+## 6. The Developer's Choice: Why these choices?
 
----
+To build a **Fintech-grade** sentinel, I implemented three key safety layers:
 
-## 6. Bonus User Story (The "Snooze" Button)
+### 1. Redis vs. Main Database
+In a production environment, heartbeats happen thousands of times per second. Writing to a traditional Database (SQLite/Postgres) for every ping would cause a massive bottleneck.
+**The Choice:** We use Redis for tracking because its RAM-based speed allows for sub-millisecond updates, and its **Atomic Locking** prevents race conditions where two heartbeats might accidentally trigger or clear the same alert.
 
-**As a** maintenance technician,
-**I want to** pause monitoring while I am repairing a device,
-**So that** I don't trigger false alarms.
+### 2. Celery for Load Management
+Instead of running timers inside the Django process (which would hog memory and potentially crash the API), we offload the "Watchdog" work to **Celery**.
+**The Choice:** This keeps the system **efficient** and **unburdened**. The worker process handles the countdowns independently, ensuring the API is always free to accept new heartbeats even if thousands of devices are being monitored simultaneously.
 
-**Acceptance Criteria:**
-
-- [ ] Create a `POST /monitors/{id}/pause` endpoint.
-- [ ] When called, the timer stops completely. No alerts will fire.
-- [ ] Calling the heartbeat endpoint again automatically "un-pauses" the monitor and restarts the timer.
-
----
-
-## 7. The "Developer's Choice" Challenge
-
-We value engineers who look for "what's missing."
-
-**Task:** Identify **one** additional feature that makes this system more robust or user-friendly.
-
-1.  **Implement it.**
-2.  **Document it:** Explain _why_ you added it in your README.
-
----
-
-## 8. Documentation Requirements
-
-Your final `README.md` must replace these instructions. It must cover:
-
-1.  **Architecture Diagram**
-2.  **Setup Instructions**
-3.  **API Documentation**
-4.  **The Developer's Choice:** Explanation of your added feature.
-
----
-
-Submit your repo link via the [online](https://forms.cloud.microsoft/e/bLyGT3byxx) form.
-
-## 🛑 Pre-Submission Checklist
-
-**WARNING:** Before you submit your solution, you **MUST** pass every item on this list.
-If you miss any of these critical steps, your submission will be **automatically rejected** and you will **NOT** be invited to an interview.
-
-### 1. 📂 Repository & Code
-
-- [ ] **Public Access:** Is your GitHub repository set to **Public**? (We cannot review private repos).
-- [ ] **Clean Code:** Did you remove unnecessary files (like `node_modules`, `.env` with real keys, or `.DS_Store`)?
-- [ ] **Run Check:** if we clone your repo and run `npm start` (or equivalent), does the server start immediately without crashing?
-
-### 2. 📄 Documentation (Crucial)
-
-- [ ] **Architecture Diagram:** Did you include a visual Diagram (Flowchart or Sequence Diagram) in the README?
-- [ ] **README Swap:** Did you **DELETE** the original instructions (the problem brief) from this file and replace it with your own documentation?
-- [ ] **API Docs:** Is there a clear list of Endpoints and Example Requests in the README?
-
-### 3. 🧹 Git Hygiene
-
-- [ ] **Commit History:** Does your repo have multiple commits with meaningful messages? (A single "Initial Commit" is a red flag).
-
----
-
-**Ready?**
-If you checked all the boxes above, submit your repository link in the application form. Good luck! 🚀
+### 3. Strict Validation & Real-Time Observer (Status API)
+Fintech companies demand absolute observability. You cannot wait for an error to know a system is down.
+**The Choice:**
+- **Strict Validation**: We block malformed data (like negative timeouts) at the door, preventing corrupted state from ever entering the watchdog queue.
+- **Get Status API**: This provides the user with **Immediate Observability**, allowing internal teams to manually verify a device's health without waiting for an automated alert email.
