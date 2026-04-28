@@ -159,8 +159,8 @@ curl -X POST https://pulse-check-5g1i.onrender.com/monitors/device-01/pause
 
 To build a **Fintech-grade** sentinel, I implemented three key safety layers:
 
-### 1. Redis vs. Main Database
-In a production environment, heartbeats happen thousands of times per second. Writing to a traditional Database (SQLite/Postgres) for every ping would cause a massive bottleneck.
+### 1. Redis vs. Supabase (PostgreSQL)
+In a production environment, heartbeats happen thousands of times per second. Writing to a traditional Database (Supabase/Postgres) for every ping would cause a massive bottleneck.
 **The Choice:** We use Redis for tracking because its RAM-based speed allows for sub-millisecond updates, and its **Atomic Locking** prevents race conditions where two heartbeats might accidentally trigger or clear the same alert.
 
 ### 2. Celery for Load Management
